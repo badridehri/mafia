@@ -1,0 +1,32 @@
+{
+    "Armes": [
+        [
+            "SMG",
+            1200
+        ],
+        [
+            "Pdw",
+            120
+        ],
+        [
+            "HAHA",
+            12
+        ]
+    ],
+    "Accessoires": [
+        [
+            "silencieux",
+            10
+        ]
+    ],
+    "Munitions": [
+        [
+            "9mm",
+            50
+        ],
+        [
+            "mun",
+            13
+        ]
+    ]
+}

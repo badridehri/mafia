@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connexion Admin</title>
+    <style>
+        body {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 100vh;
+          background: linear-gradient(135deg, #667eea, #764ba2);
+          font-family: 'Segoe UI', sans-serif;
+          margin: 0;
+        }
+
+        form {
+          background: white;
+          padding: 50px 60px;
+          border-radius: 20px;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+          text-align: center;
+          width: 320px;
+          transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        form:hover {
+          transform: translateY(-5px);
+          box-shadow: 0 15px 35px rgba(0, 0, 0, 0.3);
+        }
+
+        h2 {
+          margin-bottom: 25px;
+          color: #333;
+        }
+
+        input {
+          display: block;
+          width: 100%;
+          padding: 12px;
+          margin: 15px 0;
+          border-radius: 10px;
+          border: 1px solid #ccc;
+          outline: none;
+          font-size: 15px;
+          transition: border 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        input:focus {
+          border-color: #764ba2;
+          box-shadow: 0 0 5px rgba(118, 75, 162, 0.5);
+        }
+
+        button {
+          padding: 12px;
+          width: 100%;
+          background: #764ba2;
+          color: white;
+          border: none;
+          border-radius: 10px;
+          cursor: pointer;
+          font-size: 16px;
+          font-weight: bold;
+          transition: background 0.3s ease, transform 0.2s ease;
+        }
+
+        button:hover {
+          background: #5a3d8c;
+          transform: scale(1.03);
+        }
+
+        p {
+          color: red;
+          margin-top: 15px;
+          font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <form method="POST">
+      <h2>Connexion Admin</h2>
+      <input type="text" name="username" placeholder="Nom d'utilisateur" required>
+      <input type="password" name="password" placeholder="Mot de passe" required>
+      <button type="submit">Se connecter</button>
+      {% if message %}
+        <p>{{ message }}</p>
+      {% endif %}
+    </form>
+</body>
+</html>
