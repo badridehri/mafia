@@ -1,1 +1,7 @@
 flask
+discord.py
+python-dotenv
+flask
+aiohttp
+
+
