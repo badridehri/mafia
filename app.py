@@ -1,8 +1,10 @@
 from flask import Flask, render_template, request, redirect, jsonify, session, url_for
 import json
+import os
 
 app = Flask(__name__)
-app.secret_key = "une_clef_secrete_super_longue_et_difficile"  # Clé secrète pour les sessions
+app.secret_key = os.environ.get("SECRET_KEY", "une_clef_secrete_super_longue_et_difficile")  
+# 👉 Utilise une vraie clé dans Render/Railway : ajoute une variable d’env. SECRET_KEY
 
 USERS_FILE = "users.json"
 PRODUITS_FILE = "produits.json"
@@ -104,8 +106,7 @@ def api_produits():
     return jsonify(produits)
 
 
+# --- Lancement ---
 if __name__ == "__main__":
-    import os
-    port = int(os.environ.get("PORT", 5000))  # Railway fournit PORT automatiquement
+    port = int(os.environ.get("PORT", 5000))  # Render/Railway/Heroku donnent PORT
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
-
