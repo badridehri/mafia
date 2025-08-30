@@ -1,9 +1,125 @@
+# bot.py
+import discord
+from discord.ext import commands
+from flask import Flask, render_template, request, redirect, jsonify, session, url_for
+import threading
+import json
+import os
+import aiohttp
+import asyncio
+from dotenv import load_dotenv
+
+# -------------------- FLASK --------------------
+app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "une_clef_secrete_super_longue_et_difficile")
+
+USERS_FILE = "users.json"
+PRODUITS_FILE = "produits.json"
+
+# --- Routes Flask ---
+@app.route("/", methods=["GET", "POST"])
+def login():
+    message = ""
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "").strip()
+        if not username or not password:
+            message = "Veuillez remplir tous les champs ❌"
+            return render_template("login.html", message=message)
+        try:
+            with open(USERS_FILE, "r", encoding="utf-8") as f:
+                users = json.load(f)
+        except FileNotFoundError:
+            message = "Fichier utilisateurs introuvable ❌"
+            return render_template("login.html", message=message)
+        user = next((u for u in users if u["username"] == username and u["password"] == password), None)
+        if user:
+            session["logged_in"] = True
+            return redirect("/admin")
+        else:
+            message = "Nom d'utilisateur ou mot de passe incorrect ❌"
+    return render_template("login.html", message=message)
+
+@app.route("/admin", methods=["GET", "POST"])
+def admin():
+    if not session.get("logged_in"):
+        return redirect(url_for("login"))
+    try:
+        with open(PRODUITS_FILE, "r", encoding="utf-8") as f:
+            produits = json.load(f)
+    except FileNotFoundError:
+        produits = {}
+    message = ""
+    if request.method == "POST":
+        action = request.form.get("action")
+        cat = request.form.get("categorie", "").strip()
+        nom = request.form.get("nom", "").strip()
+        prix = request.form.get("prix", "").strip()
+        if not cat or not nom:
+            message = "Catégorie et nom du produit sont obligatoires ❌"
+            return render_template("admin.html", produits=produits, message=message)
+        if action == "ajouter":
+            try:
+                prix = int(prix)
+            except ValueError:
+                message = "Le prix doit être un nombre ❌"
+                return render_template("admin.html", produits=produits, message=message)
+            if cat not in produits:
+                produits[cat] = []
+            produits[cat].append([nom, prix])
+            message = f"Produit {nom} ajouté à {cat} ✅"
+        elif action == "supprimer":
+            if cat in produits:
+                produits[cat] = [p for p in produits[cat] if p[0] != nom]
+                message = f"Produit {nom} supprimé de {cat} ✅"
+            else:
+                message = f"Catégorie {cat} inexistante ❌"
+        with open(PRODUITS_FILE, "w", encoding="utf-8") as f:
+            json.dump(produits, f, indent=4, ensure_ascii=False)
+    return render_template("admin.html", produits=produits, message=message)
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+@app.route("/api/produits", methods=["GET"])
+def api_produits():
+    try:
+        with open(PRODUITS_FILE, "r", encoding="utf-8") as f:
+            produits = json.load(f)
+    except FileNotFoundError:
+        produits = {}
+    return jsonify(produits)
+
+def run_flask():
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
+# -------------------- DISCORD BOT --------------------
+load_dotenv()
+TOKEN = os.getenv("DISCORD_TOKEN")
+
+intents = discord.Intents.default()
+intents.message_content = True
+intents.guilds = True
+intents.members = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+PRIVATE_CHANNEL_ID = 1393953102088114197
+MARKET_CHANNEL_ID = 1393933918364893339
+bot.market_message = None
+
+# --- Tes fonctions bot (charger_produits, creer_embed, AchatView, etc.) ---
+# Copie ici tout ton code bot actuel après la section Flask
+# comme charger_produits(), creer_embed(), actualiser_produits(), classes Modal/View, commandes, etc.
+
 import discord
 from discord.ext import commands
 import json
 import aiohttp
 import asyncio
-from flask import Flask, jsonify, request, redirect, url_for, render_template_string, session
+from flask import Flask, jsonify
 from dotenv import load_dotenv
 import os
 import threading
@@ -15,62 +131,16 @@ intents.guilds = True
 intents.members = True
 
 load_dotenv()
-TOKEN = os.getenv("DISCORD_TOKEN")  # ⚠️ mets ton token dans Railway > Variables d’env
+TOKEN = os.getenv("DISCORD_TOKEN")  # Charge le token depuis .env
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 PRIVATE_CHANNEL_ID = 1393953102088114197  # salon commandes
 MARKET_CHANNEL_ID = 1393933918364893339   # salon marché noir
-bot.market_message = None
+bot.market_message = None  # On garde le message pour le mettre à jour
 
 # --- CONFIG API FLASK ---
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "secret")  # session sécurisée
 PRODUITS_FILE = "produits.json"
-USERS = {"admin": "admin123"}  # login admin
-
-# --- TEMPLATES HTML (inline) ---
-login_html = """
-<!DOCTYPE html>
-<html>
-<head><title>Login</title></head>
-<body>
-  <h2>Connexion Admin</h2>
-  <form method="POST">
-    <input type="text" name="username" placeholder="Utilisateur" required><br>
-    <input type="password" name="password" placeholder="Mot de passe" required><br>
-    <button type="submit">Se connecter</button>
-  </form>
-  {% if error %}<p style="color:red">{{ error }}</p>{% endif %}
-</body>
-</html>
-"""
-
-admin_html = """
-<!DOCTYPE html>
-<html>
-<head><title>Admin</title></head>
-<body>
-  <h2>📦 Panel Admin</h2>
-  <p><a href="{{ url_for('logout') }}">Déconnexion</a></p>
-
-  <h3>Produits actuels</h3>
-  <pre>{{ produits|tojson(indent=2) }}</pre>
-
-  <h3>Ajouter un produit</h3>
-  <form method="POST">
-    <input type="text" name="categorie" placeholder="Catégorie" required><br>
-    <input type="text" name="nom" placeholder="Nom produit" required><br>
-    <input type="number" name="prix" placeholder="Prix (k)" required><br>
-    <button type="submit">Ajouter</button>
-  </form>
-</body>
-</html>
-"""
-
-# --- ROUTES FLASK ---
-@app.route("/")
-def home():
-    return "✅ Bot + Site en ligne !"
 
 @app.route("/api/produits")
 def api_produits():
@@ -81,58 +151,32 @@ def api_produits():
         produits = {}
     return jsonify(produits)
 
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    error = None
-    if request.method == "POST":
-        user = request.form["username"]
-        pwd = request.form["password"]
-        if user in USERS and USERS[user] == pwd:
-            session["user"] = user
-            return redirect(url_for("admin"))
-        else:
-            error = "Identifiants invalides"
-    return render_template_string(login_html, error=error)
-
-@app.route("/admin", methods=["GET", "POST"])
-def admin():
-    if "user" not in session:
-        return redirect(url_for("login"))
-
-    try:
-        with open(PRODUITS_FILE, "r") as f:
-            produits = json.load(f)
-    except FileNotFoundError:
-        produits = {}
-
-    if request.method == "POST":
-        cat = request.form["categorie"]
-        nom = request.form["nom"]
-        prix = int(request.form["prix"])
-        produits.setdefault(cat, []).append([nom, prix])
-        with open(PRODUITS_FILE, "w") as f:
-            json.dump(produits, f, indent=2)
-
-    return render_template_string(admin_html, produits=produits)
-
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect(url_for("login"))
-
-# --- Charger produits ---
+# --- Charger les produits depuis l'API web ---
 async def charger_produits():
     try:
-        with open(PRODUITS_FILE, "r") as f:
-            return json.load(f)
-    except FileNotFoundError:
+        async with aiohttp.ClientSession() as session:
+            async with session.get("http://127.0.0.1:5000/api/produits") as response:
+                if response.status == 200:
+                    produits = await response.json()
+                    print("✅ Produits chargés depuis l'API")
+                    return produits
+                else:
+                    print(f"❌ Erreur API: {response.status}")
+                    return {}
+    except Exception as e:
+        print(f"❌ Erreur connexion API: {e}")
         return {}
 
-# --- Embed marché noir ---
+# --- Créer l'embed du marché noir ---
 def creer_embed(produits):
     embed = discord.Embed(
         title="💀 𝗗𝗔𝗥𝗞 𝗠𝗔𝗥𝗞𝗘𝗧 💀",
-        description="Bienvenue dans l'ombre...\n〄 **Cosa Nostra Approved** 〄",
+        description=(
+            "Bienvenue dans l'ombre...\n"
+            "**Sélectionne tes marchandises et passe commande discrètement.**\n\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "〄 **Cosa Nostra Approved** 〄"
+        ),
         color=discord.Color.dark_red()
     )
     for cat, items in produits.items():
@@ -140,9 +184,10 @@ def creer_embed(produits):
             continue
         liste = "\n".join([f"🔪 **{nom}** 〙 `{prix}k`" for nom, prix in items])
         embed.add_field(name=f"📦 {cat.upper()}", value=liste, inline=False)
+    embed.set_footer(text="Tout achat est définitif. Pas de remboursement dans l'ombre.")
     return embed
 
-# --- Actualisation auto ---
+# --- Actualisation continue ---
 async def actualiser_produits():
     await bot.wait_until_ready()
     while not bot.is_closed():
@@ -152,16 +197,128 @@ async def actualiser_produits():
             await bot.market_message.edit(embed=embed, view=AchatView(bot.produits))
         await asyncio.sleep(60)
 
-# --- Views / Modals (inchangés, à garder comme tu avais) ---
-class LivraisonView(discord.ui.View): ...
-class AchatModal(discord.ui.Modal, title="🛒 Passer une commande"): ...
-class ProduitSelect(discord.ui.Select): ...
-class ProduitSelectView(discord.ui.View): ...
-class CategorieSelect(discord.ui.Select): ...
-class CategorieSelectView(discord.ui.View): ...
-class AchatView(discord.ui.View): ...
+# --- Suivi livraison ---
+class LivraisonView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
 
-# --- Commande admin Discord ---
+    @discord.ui.button(label="Marquer comme livrée", style=discord.ButtonStyle.green)
+    async def livrer(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ Tu n'as pas la permission pour livrer.", ephemeral=True)
+            return
+
+        embed = interaction.message.embeds[0]
+        embed.color = discord.Color.green()
+        embed.set_footer(text="✅ Commande livrée")
+        await interaction.message.edit(embed=embed, view=None)
+        await interaction.response.send_message("Commande marquée comme livrée ✅", ephemeral=True)
+
+# --- Modal commande ---
+class AchatModal(discord.ui.Modal, title="🛒 Passer une commande"):
+    def __init__(self, produit_nom: str, prix: int):
+        super().__init__()
+        self.produit_nom = produit_nom
+        self.prix = prix
+        self.quantite = discord.ui.TextInput(label="Quantité", placeholder="Ex: 2", required=True)
+        self.groupe = discord.ui.TextInput(label="Nom de votre groupe", placeholder="Ex: Les Sans-Nom", required=True)
+        self.add_item(self.quantite)
+        self.add_item(self.groupe)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        private_channel = bot.get_channel(PRIVATE_CHANNEL_ID)
+        if private_channel is None:
+            await interaction.response.send_message("⚠️ Salon privé introuvable.", ephemeral=True)
+            return
+
+        try:
+            qte = int(self.quantite.value)
+        except ValueError:
+            await interaction.response.send_message("⚠️ Quantité invalide.", ephemeral=True)
+            return
+
+        total = qte * self.prix
+        nom_groupe = self.groupe.value
+
+        embed = discord.Embed(title="🛒 Nouvelle commande", color=discord.Color.red())
+        embed.add_field(name="👤 Acheteur", value=interaction.user.mention, inline=False)
+        embed.add_field(name="🏷️ Groupe", value=nom_groupe, inline=False)
+        embed.add_field(name="📦 Produit", value=self.produit_nom, inline=True)
+        embed.add_field(name="🔢 Quantité", value=str(qte), inline=True)
+        embed.add_field(name="💵 Prix unitaire", value=f"{self.prix}k", inline=True)
+        embed.add_field(name="💰 Total", value=f"{total}k", inline=False)
+        embed.set_footer(text="❌ Pas encore livrée")
+
+        await private_channel.send(embed=embed, view=LivraisonView())
+        await interaction.response.send_message(
+            f"✅ Ta commande pour **{qte}x {self.produit_nom}** ({total}k) a été envoyée.",
+            ephemeral=True
+        )
+
+# --- Sélecteur catégories et produits ---
+class ProduitSelect(discord.ui.Select):
+    def __init__(self, categorie, produits):
+        self.categorie = categorie
+        self.produits = produits
+        items = produits.get(categorie, [])
+
+        options = []
+        if not items:
+            options.append(discord.SelectOption(label="Aucun produit", value="none", default=True))
+        else:
+            seen = set()
+            for nom, prix in items:
+                if nom not in seen:
+                    options.append(discord.SelectOption(label=nom, value=f"{categorie}-{nom}", description=f"{prix}k"))
+                    seen.add(nom)
+
+        super().__init__(placeholder=f"Choisis ton {categorie}...", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.values[0] == "none":
+            await interaction.response.send_message("Cette catégorie est vide ❌", ephemeral=True)
+            return
+        nom = self.values[0].split("-", 1)[1]
+        prix = next((p for n, p in self.produits[self.categorie] if n == nom), None)
+        if prix is None:
+            await interaction.response.send_message("Produit introuvable ❌", ephemeral=True)
+            return
+        await interaction.response.send_modal(AchatModal(nom, prix))
+
+class ProduitSelectView(discord.ui.View):
+    def __init__(self, categorie, produits):
+        super().__init__()
+        self.add_item(ProduitSelect(categorie, produits))
+
+class CategorieSelect(discord.ui.Select):
+    def __init__(self, produits):
+        options = [discord.SelectOption(label=cat, description=f"{len(items)} produits") for cat, items in produits.items() if items]
+        super().__init__(placeholder="Choisis une catégorie...", options=options)
+        self.produits = produits
+
+    async def callback(self, interaction: discord.Interaction):
+        cat = self.values[0]
+        await interaction.response.edit_message(content=f"Produits dans **{cat}** :", view=ProduitSelectView(cat, self.produits))
+
+class CategorieSelectView(discord.ui.View):
+    def __init__(self, produits):
+        super().__init__()
+        self.add_item(CategorieSelect(produits))
+
+class AchatView(discord.ui.View):
+    def __init__(self, produits):
+        super().__init__(timeout=None)
+        self.produits = produits
+
+    @discord.ui.button(label="🛒 Acheter", style=discord.ButtonStyle.green)
+    async def acheter(self, interaction: discord.Interaction, button: discord.ui.Button):
+        categories_valide = {cat: items for cat, items in self.produits.items() if items}
+        if not categories_valide:
+            await interaction.response.send_message("❌ Aucun produit disponible.", ephemeral=True)
+            return
+        await interaction.response.send_message("Choisis une catégorie :", view=CategorieSelectView(categories_valide), ephemeral=True)
+
+# --- Commande admin ---
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def actualiser(ctx):
@@ -169,7 +326,7 @@ async def actualiser(ctx):
     if bot.market_message:
         embed = creer_embed(bot.produits)
         await bot.market_message.edit(embed=embed, view=AchatView(bot.produits))
-    await ctx.send("✅ Produits actualisés !")
+    await ctx.send("✅ Produits actualisés depuis le site web!")
 
 # --- Bot prêt ---
 @bot.event
@@ -184,12 +341,21 @@ async def on_ready():
         embed = creer_embed(bot.produits)
         bot.market_message = await market_channel.send(embed=embed, view=AchatView(bot.produits))
 
-# --- Lancer Flask ---
+# --- Lancer Flask en parallèle ---
 def run_flask():
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 5000))  # Railway fournit $PORT
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
-# --- Lancer BOT + SITE ---
+
+threading.Thread(target=run_flask, daemon=True).start()
+
+bot.run(TOKEN)
+
+
+# -------------------- MAIN --------------------
 if __name__ == "__main__":
+    # Lancer Flask en parallèle
     threading.Thread(target=run_flask, daemon=True).start()
+    
+    # Lancer Discord
     bot.run(TOKEN)
